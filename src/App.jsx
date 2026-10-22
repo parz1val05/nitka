@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
+import ProductView from './ProductView.jsx'
+import { products, rub, byKey } from './products.js'
 import Login from './Login.jsx'
 import Bot from './Bot.jsx'
 
@@ -6,27 +9,15 @@ import Bot from './Bot.jsx'
 const load = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) ?? fallback } catch { return fallback } }
 const save = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)) } catch { /* без сохранения */ } }
 
-const products = [
-  { id: 1, name: 'Футболка из хлопка', cat: ['m', 'w'], price: 1490, old: 2190, img: '/img/tee.jpg', color: 'Белая', badge: '−30%' },
-  { id: 2, name: 'Тренч с поясом', cat: ['w', 'outer'], price: 12900, img: '/img/coat.jpg', color: 'Кэмел', badge: 'Новинка' },
-  { id: 3, name: 'Костюм из шерсти', cat: ['m'], price: 18500, img: '/img/men.jpg', color: 'Тёмно-синий' },
-  { id: 4, name: 'Косуха из экокожи', cat: ['w', 'outer'], price: 8900, img: '/img/leather.jpg', color: 'Чёрная' },
-  { id: 5, name: 'Худи оверсайз', cat: ['m', 'w'], price: 3990, img: '/img/hoodie.jpg', color: 'Серый меланж' },
-  { id: 6, name: 'Платье макси', cat: ['w'], price: 7490, old: 9990, img: '/img/dress.jpg', color: 'Красное', badge: '−25%' },
-  { id: 7, name: 'Бомбер', cat: ['m', 'w', 'outer'], price: 5990, img: '/img/jacket.jpg', color: 'Терракот' },
-  { id: 8, name: 'Джинсы прямые', cat: ['m'], price: 4490, img: '/img/jeans.jpg', color: '3 оттенка' },
-]
-
-const filters = [['all', 'Все'], ['w', 'Женщинам'], ['m', 'Мужчинам'], ['outer', 'Верхняя одежда']]
+const filters = [['all', 'Все'], ['w', 'Женщинам'], ['m', 'Мужчинам'], ['outer', 'Верхняя одежда'], ['acc', 'Аксессуары']]
 const links = [['#catalog', 'Каталог'], ['#look', 'Лукбук'], ['#sizes', 'Размеры'], ['#contacts', 'Контакты']]
 const perks = 'Бесплатная доставка от 5 000 ₽|Примерка перед оплатой|Возврат 30 дней|Размеры 42–56'.split('|')
-const sizes = [['44', 'S', '86–90', '70–74'], ['46', 'M', '90–94', '74–78'], ['48', 'L', '94–98', '78–82'], ['50', 'XL', '98–102', '82–86'], ['52', 'XXL', '102–106', '86–90']]
-const rub = n => n.toLocaleString('ru-RU') + ' ₽'
+const sizeTable = [['44', 'S', '86–90', '70–74'], ['46', 'M', '90–94', '74–78'], ['48', 'L', '94–98', '78–82'], ['50', 'XL', '98–102', '82–86'], ['52', 'XXL', '102–106', '86–90']]
 
 export default function App() {
   const [user, setUser] = useState(() => load('nitka-user', null))
   const cartKey = 'nitka-cart-' + (user?.email ?? 'guest')
-  const [cart, setCart] = useState(() => load(cartKey, {})) // id -> количество
+  const [cart, setCart] = useState(() => load(cartKey, {})) // "id-размер" -> количество
   const [cartOpen, setCartOpen] = useState(false)
   const [loginOpen, setLoginOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -46,6 +37,31 @@ export default function App() {
   })
 
   useEffect(() => { save(cartKey, cart) }, [cartKey, cart])
+
+  // Открытие товара: фото «перелетает» из карточки в окно (View Transitions API), без поддержки — просто открывается
+  const [viewing, setViewing] = useState(null)
+  const origin = useRef() // фото карточки, из которой открыли товар
+  const morph = (photo, update) => {
+    if (!document.startViewTransition || !photo?.isConnected || matchMedia('(prefers-reduced-motion: reduce)').matches) return update()
+    photo.style.viewTransitionName = 'product-photo'
+    document.startViewTransition(() => {
+      photo.style.viewTransitionName = '' // имя должно быть только у одного элемента
+      flushSync(update)
+    })
+  }
+  const openProduct = (p, photo) => {
+    if (viewing) return setViewing(p) // переход к похожему товару внутри окна
+    origin.current = photo
+    morph(photo, () => setViewing(p))
+  }
+  const closeProduct = () => {
+    const photo = origin.current
+    if (!document.startViewTransition || !photo?.isConnected || viewing.img !== photo.getAttribute('src')) return setViewing(null)
+    document.startViewTransition(() => {
+      flushSync(() => setViewing(null))
+      photo.style.viewTransitionName = 'product-photo'
+    }).finished.finally(() => { photo.style.viewTransitionName = '' })
+  }
 
   const login = u => {
     const guest = cart
@@ -70,7 +86,7 @@ export default function App() {
   }, [])
 
   const count = Object.values(cart).reduce((a, b) => a + b, 0)
-  const sum = Object.entries(cart).reduce((s, [id, q]) => s + products.find(p => p.id === +id).price * q, 0)
+  const sum = Object.entries(cart).reduce((s, [id, q]) => s + byKey(id).price * q, 0)
   const cartInfo = count
     ? `В корзине ${count} шт. на ${rub(sum)}.` + (sum >= 5000 ? ' Доставка будет бесплатной.' : ` Добавьте ещё на ${rub(5000 - sum)} — и доставка бесплатно.`)
     : 'Корзина пока пуста. Посмотрите каталог: сейчас −30% на базовые вещи.'
@@ -84,7 +100,7 @@ export default function App() {
         <div className="ticker" aria-hidden="true"><div>
           {[...perks, ...perks].map((p, i) => <span key={i}>{p}</span>)}
         </div></div>
-        <Catalog onAdd={p => { change(p.id, 1); say(p.name + ' — в корзине') }} />
+        <Catalog onOpen={openProduct} />
         <Lookbook />
         <Sizes />
         <Subscribe say={say} />
@@ -103,6 +119,8 @@ export default function App() {
           if (!user) { setCartOpen(false); setLoginOpen(true); return say('Войдите, чтобы оформить заказ') }
           setCart({}); setCartOpen(false); say('Это демо: заказ не отправлен')
         }} />
+      {viewing && <ProductView p={viewing} close={closeProduct} open={openProduct}
+        onAdd={(p, size) => { change(p.id + '-' + size, 1); say(p.name + (size ? `, ${size}` : '') + ' — в корзине') }} />}
       {loginOpen && <Login onLogin={login} close={() => setLoginOpen(false)} />}
       <Bot cartInfo={cartInfo} openCart={() => setCartOpen(true)} />
       <div className={'toast' + (toast ? ' show' : '')} role="status">{toast}</div>
@@ -151,45 +169,47 @@ function Hero() {
   )
 }
 
-function Catalog({ onAdd }) {
+function Catalog({ onOpen }) {
   const [filter, setFilter] = useState('all')
-  const shown = products.filter(p => filter === 'all' || p.cat.includes(filter))
+  const [limit, setLimit] = useState(12)
+  const all = products.filter(p => filter === 'all' || p.cat.includes(filter))
+  const shown = all.slice(0, limit)
   return (
     <section id="catalog">
       <div className="wrap">
         <div className="head reveal">
           <h2>Каталог</h2>
           <div className="chips" role="group" aria-label="Фильтр по категории">
-            {filters.map(([f, t]) => <button key={f} className="chip" aria-pressed={filter === f} onClick={() => setFilter(f)}>{t}</button>)}
+            {filters.map(([f, t]) => <button key={f} className="chip" aria-pressed={filter === f} onClick={() => { setFilter(f); setLimit(12) }}>{t}</button>)}
           </div>
         </div>
         {/* key={filter} пересоздаёт карточки, чтобы анимация появления проигрывалась при каждой смене фильтра */}
         <div className="grid" key={filter}>
-          {shown.map((p, i) => <Card key={p.id} p={p} delay={i * 60} onAdd={onAdd} />)}
+          {shown.map((p, i) => <Card key={p.id} p={p} delay={(i % 12) * 50} onOpen={onOpen} />)}
         </div>
+        {all.length > limit && (
+          <div className="more">
+            <button className="btn btn-ghost" onClick={() => setLimit(limit + 8)}>Показать ещё · {all.length - limit}</button>
+          </div>
+        )}
       </div>
     </section>
   )
 }
 
-function Card({ p, delay, onAdd }) {
-  const [done, setDone] = useState(false)
-  const add = () => {
-    onAdd(p)
-    setDone(true)
-    setTimeout(() => setDone(false), 1400)
-  }
+function Card({ p, delay, onOpen }) {
+  const photo = useRef()
   return (
     <article className="card" style={{ animationDelay: delay + 'ms' }}>
-      <div className="pic">
-        <img src={p.img} alt={`${p.name}, ${p.color.toLowerCase()}`} loading="lazy" />
+      <button className="pic" onClick={() => onOpen(p, photo.current)} aria-label={`${p.name} — открыть`}>
+        <img ref={photo} src={p.img} alt={`${p.name}, ${p.color.toLowerCase()}`} loading="lazy" />
         {p.badge && <span className="badge">{p.badge}</span>}
-        <button className={'add' + (done ? ' done' : '')} onClick={add}>{done ? 'Добавлено ✓' : 'В корзину'}</button>
-      </div>
+        <span className="add">Смотреть</span>
+      </button>
       <h3>{p.name}</h3>
       <div className="meta">
         <span>{p.color}</span>
-        <span className="price">{rub(p.price)}{p.old && <s>{rub(p.old)}</s>}</span>
+        <span className="price">{rub(p.price)}{p.old > 0 && <s>{rub(p.old)}</s>}</span>
       </div>
     </article>
   )
@@ -224,7 +244,7 @@ function Sizes() {
           <div className="table-box">
             <table>
               <thead><tr><th>Размер</th><th>Межд.</th><th>Обхват груди, см</th><th>Обхват талии, см</th></tr></thead>
-              <tbody>{sizes.map(r => <tr key={r[0]}>{r.map((c, i) => <td key={i}>{c}</td>)}</tr>)}</tbody>
+              <tbody>{sizeTable.map(r => <tr key={r[0]}>{r.map((c, i) => <td key={i}>{c}</td>)}</tr>)}</tbody>
             </table>
           </div>
         </div>
@@ -257,24 +277,26 @@ function Subscribe({ say }) {
 }
 
 function Cart({ cart, sum, change, remove, clear, close, checkout }) {
-  const items = Object.entries(cart).map(([id, q]) => [products.find(p => p.id === +id), q])
+  const items = Object.entries(cart).map(([key, q]) => [byKey(key), q, key, key.split('-')[1]])
   return (
     <>
       <div className="scrim" onClick={close} />
       <aside className="drawer" aria-label="Корзина">
         <div className="drawer-head"><h2>Корзина</h2><button className="icon-btn" aria-label="Закрыть корзину" onClick={close}>✕</button></div>
         <div className="items">
-          {items.length ? items.map(([p, q]) => (
-            <div className="item" key={p.id}>
+          {items.length ? items.map(([p, q, key, size]) => (
+            <div className="item" key={key}>
               <img src={p.img} alt="" />
               <div>
-                <b>{p.name}</b><small>{rub(p.price)} × {q} = {rub(p.price * q)}</small>
-                <button className="link" onClick={() => remove(p.id)}>Удалить</button>
+                <b>{p.name}</b>
+                {size && <small>Размер {size}</small>}
+                <small>{rub(p.price)} × {q} = {rub(p.price * q)}</small>
+                <button className="link" onClick={() => remove(key)}>Удалить</button>
               </div>
               <div className="qty">
-                <button aria-label="Убрать одну" onClick={() => change(p.id, -1)}>−</button>
+                <button aria-label="Убрать одну" onClick={() => change(key, -1)}>−</button>
                 <span>{q}</span>
-                <button aria-label="Добавить ещё" onClick={() => change(p.id, 1)}>+</button>
+                <button aria-label="Добавить ещё" onClick={() => change(key, 1)}>+</button>
               </div>
             </div>
           )) : <p className="empty">Корзина пока пуста.<br />Добавьте вещи из каталога.</p>}

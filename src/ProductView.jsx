@@ -111,6 +111,7 @@ export default function ProductView({ p, close, open, onAdd }) {
 
           <div className="pv-buy">
             <span className="pv-buy-price">{rub(p.price)}</span>
+            {added && <span className="pow pow-add" aria-hidden="true">ХОП!</span>}
             <button className={'btn btn-main' + (added ? ' done' : '')} onClick={add}>{added ? 'Добавлено ✓' : 'В корзину'}</button>
           </div>
 

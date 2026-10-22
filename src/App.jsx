@@ -161,9 +161,13 @@ function Hero() {
           <a className="btn btn-ghost" href="#look">Лукбук</a>
         </div>
       </div>
-      <div className="hero-pic">
-        <img src="/img/hero.jpg" alt="Рейл с блузками и кардиганами на деревянных плечиках" />
-        <div className="tag"><b>−30%</b>на базовые вещи до 31 октября</div>
+      <div className="hero-art">
+        <span className="burst" aria-hidden="true" />
+        <div className="hero-pic">
+          <img src="/img/hero.jpg" alt="Рейл с блузками и кардиганами на деревянных плечиках" />
+          <div className="tag"><b>−30%</b>на базовые вещи до 31 октября</div>
+        </div>
+        <span className="pow pow-hero" aria-hidden="true">БАМ!</span>
       </div>
     </div>
   )
@@ -185,7 +189,7 @@ function Catalog({ onOpen }) {
         </div>
         {/* key={filter} пересоздаёт карточки, чтобы анимация появления проигрывалась при каждой смене фильтра */}
         <div className="grid" key={filter}>
-          {shown.map((p, i) => <Card key={p.id} p={p} delay={(i % 12) * 50} onOpen={onOpen} />)}
+          {shown.map((p, i) => <Card key={p.id} p={p} delay={(i % 12) * 50} pow={pows[i % pows.length]} onOpen={onOpen} />)}
         </div>
         {all.length > limit && (
           <div className="more">
@@ -197,10 +201,12 @@ function Catalog({ onOpen }) {
   )
 }
 
-function Card({ p, delay, onOpen }) {
+const pows = ['ВАУ!', 'ОГО!', 'ХОП!', 'БУМ!', 'ВЖУХ!', 'ЕЕ!']
+
+function Card({ p, delay, pow, onOpen }) {
   const photo = useRef()
   return (
-    <article className="card" style={{ animationDelay: delay + 'ms' }}>
+    <article className="card" style={{ animationDelay: delay + 'ms' }} data-pow={pow}>
       <button className="pic" onClick={() => onOpen(p, photo.current)} aria-label={`${p.name} — открыть`}>
         <img ref={photo} src={p.img} alt={`${p.name}, ${p.color.toLowerCase()}`} loading="lazy" />
         {p.badge && <span className="badge">{p.badge}</span>}

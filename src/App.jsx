@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
-import ProductView from './ProductView.jsx'
+import ProductView, { Heart } from './ProductView.jsx'
+import { photoFor, isSimilar } from './colorPhotos.js'
 import { products, rub, parseKey, cartKey } from './products.js'
 import { STORE } from './store.js'
 import Auth from './Auth.jsx'
@@ -10,7 +11,7 @@ import Bot from './Bot.jsx'
 const load = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) ?? fallback } catch { return fallback } }
 const save = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)) } catch { /* без сохранения */ } }
 
-const filters = [['all', 'Все'], ['w', 'Женщинам'], ['m', 'Мужчинам'], ['classic', 'Классика'], ['shoes', 'Обувь'], ['outer', 'Верхняя одежда'], ['acc', 'Аксессуары']]
+const filters = [['all', 'Все'], ['w', 'Женщинам'], ['m', 'Мужчинам'], ['classic', 'Классика'], ['shoes', 'Обувь'], ['outer', 'Верхняя одежда'], ['acc', 'Аксессуары'], ['fav', 'Избранное']]
 const links = [['#catalog', 'Каталог'], ['#info', 'Покупателям'], ['#sizes', 'Размеры'], ['#contacts', 'Контакты']]
 const perks = ['Бесплатная доставка от 5 000 ₽', 'Примерка перед оплатой', 'Возврат 30 дней', 'Одежда 44–52 · обувь 35–45']
 const sizeTable = [['44', 'S', '86–90', '70–74'], ['46', 'M', '90–94', '74–78'], ['48', 'L', '94–98', '78–82'], ['50', 'XL', '98–102', '82–86'], ['52', 'XXL', '102–106', '86–90']]
@@ -27,6 +28,8 @@ export default function App() {
   const [filter, setFilter] = useState('all')
   const [toast, setToast] = useState('')
   const toastTimer = useRef()
+  const [favs, setFavs] = useState(() => load('nitka-favs', [])) // id избранных товаров
+  const [pastHero, setPastHero] = useState(false)
 
   const say = text => {
     setToast(text)
@@ -41,9 +44,19 @@ export default function App() {
   })
 
   useEffect(() => { save(storeKey, cart) }, [storeKey, cart])
+  useEffect(() => { save('nitka-favs', favs) }, [favs])
+  const toggleFav = id => setFavs(f => f.includes(id) ? f.filter(x => x !== id) : [...f, id])
+
+  useEffect(() => { // кнопка «Наверх» — после первого экрана
+    const on = () => setPastHero(scrollY > innerHeight)
+    on()
+    addEventListener('scroll', on, { passive: true })
+    return () => removeEventListener('scroll', on)
+  }, [])
 
   // Открытие товара: фото «перелетает» из карточки в окно (View Transitions API), без поддержки — просто открывается
   const [viewing, setViewing] = useState(null)
+  const [viewColor, setViewColor] = useState(null) // цвет, выбранный в карточке перед открытием
   const origin = useRef() // фото карточки, из которой открыли товар
   const morph = (photo, update) => {
     if (!document.startViewTransition || !photo?.isConnected || matchMedia('(prefers-reduced-motion: reduce)').matches) return update()
@@ -53,14 +66,14 @@ export default function App() {
       flushSync(update)
     })
   }
-  const openProduct = (p, photo) => {
-    if (viewing) return setViewing(p) // переход к похожему товару внутри окна
+  const openProduct = (p, photo, color) => {
+    if (viewing) { setViewColor(null); return setViewing(p) } // переход к похожему товару внутри окна
     origin.current = photo
-    morph(photo, () => setViewing(p))
+    morph(photo, () => { setViewColor(color); setViewing(p) })
   }
   const closeProduct = () => {
     const photo = origin.current
-    if (!document.startViewTransition || !photo?.isConnected || viewing.img !== photo.getAttribute('src')) return setViewing(null)
+    if (!document.startViewTransition || !photo?.isConnected || document.querySelector('.pv-slide img')?.getAttribute('src') !== photo.getAttribute('src')) return setViewing(null)
     document.startViewTransition(() => {
       flushSync(() => setViewing(null))
       photo.style.viewTransitionName = 'product-photo'
@@ -88,7 +101,8 @@ export default function App() {
     return () => document.removeEventListener('keydown', onKey)
   }, [])
 
-  const showCategory = f => { setFilter(f); document.getElementById('catalog').scrollIntoView({ behavior: 'smooth' }) }
+  // плавность задаёт CSS (scroll-behavior), при reduced motion — без анимации
+  const showCategory = f => { setFilter(f); document.getElementById('catalog').scrollIntoView() }
 
   const count = Object.values(cart).reduce((a, b) => a + b, 0)
   const sum = Object.entries(cart).reduce((s, [k, q]) => s + (parseKey(k).p?.price ?? 0) * q, 0)
@@ -98,14 +112,15 @@ export default function App() {
 
   return (
     <div className={(cartOpen ? 'open ' : '') + (menuOpen ? 'menu-open' : '')}>
-      <Header count={count} menuOpen={menuOpen} setMenuOpen={setMenuOpen} openCart={() => setCartOpen(true)}
+      <div className="progress" aria-hidden="true" />
+      <Header favCount={favs.length} showFavs={() => showCategory('fav')} count={count} menuOpen={menuOpen} setMenuOpen={setMenuOpen} openCart={() => setCartOpen(true)}
         user={user} openAuth={setAuthOpen} logout={logout} />
       <main>
         <Hero showCategory={showCategory} />
         <div className="ticker" aria-hidden="true"><div>
           {[...perks, ...perks].map((p, i) => <span key={i}>{p}</span>)}
         </div></div>
-        <Catalog filter={filter} setFilter={setFilter} onOpen={openProduct} />
+        <Catalog filter={filter} setFilter={setFilter} onOpen={openProduct} favs={favs} toggleFav={toggleFav} />
         <Collections showCategory={showCategory} />
         <Info />
         <Sizes />
@@ -120,16 +135,18 @@ export default function App() {
           if (!user) { setCartOpen(false); setAuthOpen('login'); return say('Войдите, чтобы оформить заказ') }
           setCart({}); setCartOpen(false); say('Это демо: заказ не отправлен')
         }} />
-      {viewing && <ProductView p={viewing} close={closeProduct} open={openProduct}
+      {viewing && <ProductView p={viewing} close={closeProduct} open={openProduct} initialColor={viewColor}
+        fav={favs.includes(viewing.id)} toggleFav={toggleFav}
         onAdd={(p, size, color) => { change(cartKey(p, size, color), 1); say(`${p.name}, ${[size, color.toLowerCase()].filter(Boolean).join(', ')} — в корзине`) }} />}
       {authOpen && <Auth initialMode={authOpen} onLogin={login} close={() => setAuthOpen(null)} />}
       <Bot cartInfo={cartInfo} openCart={() => setCartOpen(true)} />
+      <button className={'to-top' + (pastHero ? ' show' : '')} aria-label="Наверх" onClick={() => scrollTo({ top: 0 })}>↑</button>
       <div className={'toast' + (toast ? ' show' : '')} role="status">{toast}</div>
     </div>
   )
 }
 
-function Header({ count, menuOpen, setMenuOpen, openCart, user, openAuth, logout }) {
+function Header({ favCount, showFavs, count, menuOpen, setMenuOpen, openCart, user, openAuth, logout }) {
   return (
     <header id="top">
       <div className="wrap bar">
@@ -139,6 +156,9 @@ function Header({ count, menuOpen, setMenuOpen, openCart, user, openAuth, logout
           ? <button className="icon-btn account" onClick={logout} title="Выйти из аккаунта"><span className="avatar">{user.name[0].toUpperCase()}</span><span className="acc-text">{user.name} · </span>Выйти</button>
           : <button className="icon-btn account" onClick={() => openAuth('login')}>Войти</button>}
         <button className="icon-btn burger" aria-expanded={menuOpen} aria-controls="menu" onClick={() => setMenuOpen(!menuOpen)}>Меню</button>
+        <button className="icon-btn" aria-label={`Избранное, товаров: ${favCount}`} onClick={showFavs}>
+          <Heart on={favCount > 0} /> <span className="count" key={favCount}>{favCount}</span>
+        </button>
         <button className="icon-btn" aria-label={`Корзина, товаров: ${count}`} onClick={openCart}>
           <span className="cart-text">Корзина</span> <span className="count" key={count}>{count}</span>
         </button>
@@ -171,9 +191,9 @@ function Hero({ showCategory }) {
   )
 }
 
-function Catalog({ filter, setFilter, onOpen }) {
+function Catalog({ filter, setFilter, onOpen, favs, toggleFav }) {
   const [limit, setLimit] = useState(12)
-  const all = products.filter(p => filter === 'all' || p.cat.includes(filter))
+  const all = products.filter(p => filter === 'fav' ? favs.includes(p.id) : filter === 'all' || p.cat.includes(filter))
   const shown = all.slice(0, limit)
   return (
     <section id="catalog">
@@ -186,8 +206,9 @@ function Catalog({ filter, setFilter, onOpen }) {
         </div>
         {/* key={filter} пересоздаёт карточки, чтобы анимация появления проигрывалась при каждой смене фильтра */}
         <div className="grid" key={filter}>
-          {shown.map((p, i) => <Card key={p.id} p={p} delay={(i % 12) * 40} onOpen={onOpen} />)}
+          {shown.map((p, i) => <Card key={p.id} p={p} delay={(i % 12) * 40} onOpen={onOpen} fav={favs.includes(p.id)} toggleFav={toggleFav} />)}
         </div>
+        {filter === 'fav' && !all.length && <p className="muted empty-fav">В избранном пока пусто. Нажмите на сердечко на карточке товара.</p>}
         {all.length > limit && (
           <div className="more">
             <button className="btn btn-ghost" onClick={() => setLimit(limit + 8)}>Показать ещё · {all.length - limit}</button>
@@ -198,19 +219,26 @@ function Catalog({ filter, setFilter, onOpen }) {
   )
 }
 
-function Card({ p, delay, onOpen }) {
+function Card({ p, delay, onOpen, fav, toggleFav }) {
   const photo = useRef()
+  const [color, setColor] = useState(p.color)
+  const src = photoFor(p, color)
   return (
-    <article className="card" style={{ animationDelay: delay + 'ms' }}>
-      <button className="pic" onClick={() => onOpen(p, photo.current)} aria-label={`${p.name} — подробнее`}>
-        <img ref={photo} src={p.img} alt={`${p.name}, ${p.color.toLowerCase()}`} loading="lazy" />
-        {p.badge && <span className="badge">{p.badge}</span>}
-        <span className="add">Подробнее</span>
-      </button>
+    <article className="card" style={{ '--d': delay + 'ms' }}>
+      <div className="media">
+        <button className="pic" onClick={() => onOpen(p, photo.current, color)} aria-label={`${p.name} — подробнее`}>
+          {/* key — новое фото цвета плавно проявляется */}
+          <img key={src} ref={photo} src={src} alt={`${p.name}, ${(isSimilar(p, color) ? color : p.color).toLowerCase()}`} loading="lazy" />
+          {p.badge && <span className="badge">{p.badge}</span>}
+          <span className="add">Подробнее</span>
+        </button>
+        <button className="fav" aria-pressed={fav} aria-label={`В избранное: ${p.name}`} onClick={() => toggleFav(p.id)}><Heart on={fav} /></button>
+      </div>
       <h3>{p.name}</h3>
       <div className="meta">
-        <span className="dots" aria-label={`Цвета: ${p.colors.map(c => c.name).join(', ')}`}>
-          {p.colors.map(c => <i key={c.name} style={{ '--sw': c.hex }} title={c.name} />)}
+        <span className="dots" role="group" aria-label="Цвета">
+          {p.colors.map(c => <button key={c.name} aria-label={`Цвет: ${c.name}`} aria-pressed={color === c.name} title={c.name} style={{ '--sw': c.hex }}
+            onPointerEnter={() => setColor(c.name)} onFocus={() => setColor(c.name)} onClick={() => setColor(c.name)} />)}
         </span>
         <span>{p.oneSize ? 'Один размер' : `${p.sizes[0]}–${p.sizes[p.sizes.length - 1]}`}</span>
       </div>
@@ -346,7 +374,7 @@ function Cart({ cart, sum, change, remove, clear, close, checkout }) {
         <div className="items">
           {items.length ? items.map(({ p, q, key, size, color }) => (
             <div className="item" key={key}>
-              <img src={p.img} alt="" />
+              <img src={photoFor(p, color)} alt="" />
               <div>
                 <b>{p.name}</b>
                 <small>{[size && `Размер ${size}`, color].filter(Boolean).join(' · ')}</small>

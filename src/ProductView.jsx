@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { products, rub, inStock } from './products.js'
+import { photoFor, isSimilar } from './colorPhotos.js'
+
+export const Heart = ({ on }) => (
+  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+    <path d="M12 20.5s-7.5-4.6-7.5-10.1A4.4 4.4 0 0 1 12 7.6a4.4 4.4 0 0 1 7.5 2.8c0 5.5-7.5 10.1-7.5 10.1z" fill={on ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+  </svg>
+)
 
 // Слайды галереи — один снимок в разном приближении
 const slides = [
@@ -8,9 +15,11 @@ const slides = [
   { label: 'Фактура', scale: 3.2 },
 ]
 
-export default function ProductView({ p, close, open, onAdd }) {
+export default function ProductView({ p, close, open, onAdd, initialColor, fav, toggleFav }) {
+  const start = initialColor ?? p.color
   const [size, setSize] = useState('')
-  const [color, setColor] = useState(p.color)
+  const [color, setColor] = useState(start)
+  const [swapped, setSwapped] = useState(false) // плавная смена фото только после выбора цвета, не при открытии
   const [slide, setSlide] = useState(0)
   const [zoom, setZoom] = useState(null) // {x, y} в процентах, когда фото увеличено
   const [needSize, setNeedSize] = useState(false)
@@ -20,10 +29,10 @@ export default function ProductView({ p, close, open, onAdd }) {
 
   // при открытии другого товара — всё с начала
   useEffect(() => {
-    setSize(''); setColor(p.color); setSlide(0); setZoom(null); setNeedSize(false)
+    setSize(''); setColor(start); setSwapped(false); setSlide(0); setZoom(null); setNeedSize(false)
     track.current.scrollTo({ left: 0 })
     panel.current.scrollTo({ top: 0, behavior: 'smooth' })
-  }, [p.id, p.color])
+  }, [p.id, start])
 
   useEffect(() => {
     const onKey = e => {
@@ -60,6 +69,9 @@ export default function ProductView({ p, close, open, onAdd }) {
     setTimeout(() => setAdded(false), 1400)
   }
 
+  const src = photoFor(p, color)
+  const similar = isSimilar(p, color)
+  const photoColor = similar ? color : p.color // какой цвет реально на фото
   const related = products.filter(r => r.id !== p.id && r.cat.some(c => p.cat.includes(c))).slice(0, 8)
 
   return (
@@ -74,7 +86,7 @@ export default function ProductView({ p, close, open, onAdd }) {
               <div key={i} className={'pv-slide' + (zoom && slide === i ? ' zoomed' : '')}
                 onClick={e => setZoom(zoom ? null : point(e))}
                 onPointerMove={e => zoom && slide === i && setZoom(point(e))}>
-                <img src={p.img} alt={`${p.name}: ${s.label.toLowerCase()}`} draggable="false"
+                <img key={src} src={src} className={swapped ? 'swap' : undefined} alt={`${p.name}, ${photoColor.toLowerCase()}: ${s.label.toLowerCase()}`} draggable="false"
                   style={{
                     objectPosition: i ? p.focus : 'center',
                     transformOrigin: zoom && slide === i ? `${zoom.x}% ${zoom.y}%` : (i ? p.focus : 'center'),
@@ -89,7 +101,8 @@ export default function ProductView({ p, close, open, onAdd }) {
           <div className="pv-dots">
             {slides.map((s, i) => <button key={i} aria-label={s.label} aria-current={slide === i} onClick={() => go(i)} />)}
           </div>
-          <span className="pv-hint">{zoom ? 'Нажмите, чтобы уменьшить' : `${slides[slide].label} · на фото: ${p.color.toLowerCase()}`}</span>
+          {similar && <p className="pv-note" key={color}>Похожая модель в цвете «{color.toLowerCase()}» — другая вещь похожего фасона</p>}
+          <span className="pv-hint">{zoom ? 'Нажмите, чтобы уменьшить' : `${slides[slide].label} · на фото: ${photoColor.toLowerCase()}`}</span>
         </div>
 
         <div className="pv-info" key={p.id}>
@@ -98,11 +111,11 @@ export default function ProductView({ p, close, open, onAdd }) {
           <div className="pv-price">{rub(p.price)}{p.old > 0 && <s>{rub(p.old)}</s>}</div>
 
           <div>
-            <div className="pv-label"><span>Цвет: <b>{color}</b></span>{color !== p.color && <span className="muted">на фото — {p.color.toLowerCase()}</span>}</div>
+            <div className="pv-label"><span>Цвет: <b>{color}</b></span>{color !== photoColor && <span className="muted">на фото — {photoColor.toLowerCase()}</span>}</div>
             <div className="swatches" role="radiogroup" aria-label="Цвет">
               {p.colors.map(c => (
                 <button key={c.name} role="radio" aria-checked={color === c.name} aria-label={c.name} title={c.name}
-                  style={{ '--sw': c.hex }} onClick={() => setColor(c.name)} />
+                  style={{ '--sw': c.hex }} onClick={() => { setColor(c.name); setSwapped(true) }} />
               ))}
             </div>
           </div>
@@ -124,6 +137,7 @@ export default function ProductView({ p, close, open, onAdd }) {
           <div className="pv-buy">
             <span className="pv-buy-price">{rub(p.price)}</span>
             <button className={'btn btn-main' + (added ? ' done' : '')} onClick={add}>{added ? 'Добавлено в корзину' : 'В корзину'}</button>
+            <button className="icon-btn fav-btn" aria-pressed={fav} aria-label="В избранное" onClick={() => toggleFav(p.id)}><Heart on={fav} /></button>
           </div>
 
           <dl className="specs">

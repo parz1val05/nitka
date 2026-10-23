@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { products, sizes, rub } from './products.js'
+import { products, rub, inStock } from './products.js'
 
 // Слайды галереи — один снимок в разном приближении
 const slides = [
@@ -10,6 +10,7 @@ const slides = [
 
 export default function ProductView({ p, close, open, onAdd }) {
   const [size, setSize] = useState('')
+  const [color, setColor] = useState(p.color)
   const [slide, setSlide] = useState(0)
   const [zoom, setZoom] = useState(null) // {x, y} в процентах, когда фото увеличено
   const [needSize, setNeedSize] = useState(false)
@@ -19,10 +20,10 @@ export default function ProductView({ p, close, open, onAdd }) {
 
   // при открытии другого товара — всё с начала
   useEffect(() => {
-    setSize(''); setSlide(0); setZoom(null); setNeedSize(false)
+    setSize(''); setColor(p.color); setSlide(0); setZoom(null); setNeedSize(false)
     track.current.scrollTo({ left: 0 })
     panel.current.scrollTo({ top: 0, behavior: 'smooth' })
-  }, [p.id])
+  }, [p.id, p.color])
 
   useEffect(() => {
     const onKey = e => {
@@ -51,10 +52,10 @@ export default function ProductView({ p, close, open, onAdd }) {
   const add = () => {
     if (!p.oneSize && !size) {
       setNeedSize(false)
-      requestAnimationFrame(() => setNeedSize(true)) // перезапуск анимации «встряски»
+      requestAnimationFrame(() => setNeedSize(true)) // перезапуск анимации подсказки
       return
     }
-    onAdd(p, p.oneSize ? '' : size)
+    onAdd(p, p.oneSize ? '' : size, color)
     setAdded(true)
     setTimeout(() => setAdded(false), 1400)
   }
@@ -88,22 +89,33 @@ export default function ProductView({ p, close, open, onAdd }) {
           <div className="pv-dots">
             {slides.map((s, i) => <button key={i} aria-label={s.label} aria-current={slide === i} onClick={() => go(i)} />)}
           </div>
-          <span className="pv-hint">{zoom ? 'Нажмите, чтобы уменьшить' : `${slides[slide].label} · нажмите для увеличения`}</span>
+          <span className="pv-hint">{zoom ? 'Нажмите, чтобы уменьшить' : `${slides[slide].label} · на фото: ${p.color.toLowerCase()}`}</span>
         </div>
 
         <div className="pv-info" key={p.id}>
-          {p.badge && <span className="badge static">{p.badge}</span>}
+          <span className="eyebrow">{p.sku}{p.badge && ` · ${p.badge}`}</span>
           <h2>{p.name}</h2>
           <div className="pv-price">{rub(p.price)}{p.old > 0 && <s>{rub(p.old)}</s>}</div>
-          <p className="muted">Цвет: {p.color}</p>
+
+          <div>
+            <div className="pv-label"><span>Цвет: <b>{color}</b></span>{color !== p.color && <span className="muted">на фото — {p.color.toLowerCase()}</span>}</div>
+            <div className="swatches" role="radiogroup" aria-label="Цвет">
+              {p.colors.map(c => (
+                <button key={c.name} role="radio" aria-checked={color === c.name} aria-label={c.name} title={c.name}
+                  style={{ '--sw': c.hex }} onClick={() => setColor(c.name)} />
+              ))}
+            </div>
+          </div>
 
           {p.oneSize ? <p className="muted">Один размер</p> : (
             <div>
-              <div className="pv-label"><b>Размер</b><a href="#sizes" onClick={close}>Таблица размеров</a></div>
+              <div className="pv-label"><span>Размер{size && <>: <b>{size}</b></>}</span><a href="#sizes" onClick={close}>Таблица размеров</a></div>
               <div className={'pv-sizes' + (needSize ? ' shake' : '')} role="radiogroup" aria-label="Размер">
-                {sizes.map(s => (
-                  <button key={s} role="radio" aria-checked={size === s} onClick={() => { setSize(s); setNeedSize(false) }}>{s}</button>
-                ))}
+                {p.sizes.map(s => {
+                  const ok = inStock(p, s)
+                  return <button key={s} role="radio" aria-checked={size === s} disabled={!ok}
+                    title={ok ? '' : 'Нет в наличии'} onClick={() => { setSize(s); setNeedSize(false) }}>{s}</button>
+                })}
               </div>
               {needSize && <p className="error" role="alert">Выберите размер</p>}
             </div>
@@ -111,18 +123,19 @@ export default function ProductView({ p, close, open, onAdd }) {
 
           <div className="pv-buy">
             <span className="pv-buy-price">{rub(p.price)}</span>
-            {added && <span className="pow pow-add" aria-hidden="true">ХОП!</span>}
-            <button className={'btn btn-main' + (added ? ' done' : '')} onClick={add}>{added ? 'Добавлено ✓' : 'В корзину'}</button>
+            <button className={'btn btn-main' + (added ? ' done' : '')} onClick={add}>{added ? 'Добавлено в корзину' : 'В корзину'}</button>
           </div>
 
-          <p>{p.desc}</p>
+          <dl className="specs">
+            <div><dt>Описание</dt><dd>{p.desc}</dd></div>
+            <div><dt>Цвета</dt><dd>{p.colors.map(c => c.name).join(', ')}</dd></div>
+            {!p.oneSize && <div><dt>Размеры</dt><dd>{p.sizes[0]}–{p.sizes[p.sizes.length - 1]}{p.kind === 'shoes' ? ' (RU)' : ''}</dd></div>}
+            <div><dt>Уход</dt><dd>{p.care}</dd></div>
+            <div><dt>Артикул</dt><dd>{p.sku}</dd></div>
+          </dl>
           <details>
             <summary>Доставка и возврат</summary>
             <p className="muted">Доставка 1–3 дня, от 5 000 ₽ бесплатно. Примерка перед оплатой, возврат 30 дней.</p>
-          </details>
-          <details>
-            <summary>Уход</summary>
-            <p className="muted">Стирка при 30 °C, гладить с изнанки, не отбеливать.</p>
           </details>
 
           <h3 className="pv-related-title">Похожие товары</h3>
